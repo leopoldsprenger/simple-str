@@ -37,39 +37,45 @@ struct Str {
   inline std::vector<std::string_view> split(char delim) const {
     std::vector<std::string_view> result;
     size_t start = 0;
+
     for (size_t i = 0; i < s.size(); ++i) {
-      if (s[i] != delim)
-        continue;
-      result.push_back(s.substr(start, i - start));
-      start = i + 1;
+      if (s[i] == delim) {
+        result.emplace_back(s.data() + start, i - start);
+        start = i + 1;
+      }
     }
-    if (start <= s.size())
-      result.push_back(s.substr(start));
+
+    // tail
+    result.emplace_back(s.data() + start, s.size() - start);
     return result;
   }
 
   // Python-style default split (whitespace)
   inline std::vector<std::string_view> split() const {
     std::vector<std::string_view> result;
-    size_t start = 0;
+
     auto is_space = [](char c) {
       return c == ' ' || c == '\t' || c == '\n' || c == '\r';
     };
 
-    while (start < s.size() && is_space(s[start]))
-      ++start;
-    for (size_t i = start; i < s.size(); ++i) {
-      if (!is_space(s[i]))
-        continue;
-      if (i > start)
-        result.push_back(s.substr(start, i - start));
-      start = i + 1;
-      while (start < s.size() && is_space(s[start]))
-        ++start;
-      i = start - 1;
+    size_t i = 0;
+    const size_t n = s.size();
+
+    while (i < n) {
+      while (i < n && is_space(s[i]))
+        ++i;
+
+      if (i >= n)
+        break;
+
+      size_t start = i;
+
+      while (i < n && !is_space(s[i]))
+        ++i;
+
+      result.emplace_back(s.data() + start, i - start);
     }
-    if (start < s.size())
-      result.push_back(s.substr(start));
+
     return result;
   }
 
