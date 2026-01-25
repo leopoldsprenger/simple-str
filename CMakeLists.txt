@@ -3,28 +3,24 @@ project(SimpleStrTests)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 
 # Library headers
-include_directories(${CMAKE_SOURCE_DIR}/include)
+set(INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 
-# Catch2 (Homebrew path on macOS)
+# Catch2 (Homebrew)
 list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/lib/cmake/Catch2")
-
-# Find Catch2
 find_package(Catch2 3 REQUIRED)
 
-# Test executable
-add_executable(tests
-    tests/test_simplestr.cpp
-)
-
-# Link Catch2 main
+# ---------------- Tests ----------------
+add_executable(tests tests/test_simplestr.cpp)
+target_include_directories(tests PRIVATE ${INCLUDE_DIR})
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
 
-# Benchmark executable
-add_executable(benchmark
-    bench/benchmark_all.cpp
+# ---------------- Benchmark ----------------
+add_executable(benchmark bench/benchmark_all.cpp)
+target_include_directories(benchmark PRIVATE ${INCLUDE_DIR})
+target_compile_options(benchmark PRIVATE
+    $<$<CONFIG:Release>:-O3 -march=native -flto -DNDEBUG>
 )
-
-# Enable high optimization for benchmarks
-target_compile_options(benchmark PRIVATE -O3)
+target_link_libraries(benchmark PRIVATE Catch2::Catch2)
