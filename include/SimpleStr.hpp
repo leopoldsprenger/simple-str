@@ -9,6 +9,14 @@
 #include <vector>
 #include <cstring>
 
+#if defined(__APPLE__) && defined(__MACH__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__ARM_NEON) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 namespace SimpleStr {
 
 struct Str {
@@ -18,11 +26,11 @@ struct Str {
     Str() = default;
     Str(std::string_view sv) : s(sv) {}
 
-    // ---------------- Conversion operators ----------------
+    // ---------------- Conversion ----------------
     operator std::string_view() const { return s; }
     const std::string& str() const { return s; }
 
-    // ---------------- Basic string checks ----------------
+    // ---------------- Basic checks ----------------
     inline bool startswith(std::string_view prefix) const {
         return s.size() >= prefix.size() &&
                std::memcmp(s.data(), prefix.data(), prefix.size()) == 0;
@@ -35,17 +43,23 @@ struct Str {
 
     // ---------------- Split & Join ----------------
     inline std::vector<std::string_view> split(char delim) const {
+        size_t count = 1;
+        for (char c : s) if (c == delim) ++count;
         std::vector<std::string_view> result;
-        size_t start = 0;
+        result.reserve(count);
 
-        for (size_t i = 0; i < s.size(); ++i) {
-            if (s[i] == delim) {
-                result.emplace_back(s.data() + start, i - start);
-                start = i + 1;
+        const char* start = s.data();
+        const char* ptr = start;
+        const char* end = start + s.size();
+
+        while (ptr < end) {
+            if (*ptr == delim) {
+                result.emplace_back(start, ptr - start);
+                start = ptr + 1;
             }
+            ++ptr;
         }
-
-        result.emplace_back(s.data() + start, s.size() - start);
+        result.emplace_back(start, ptr - start);
         return result;
     }
 
@@ -70,11 +84,16 @@ struct Str {
         total_size += sep.size() * (parts.size() ? parts.size() - 1 : 0);
 
         std::string result;
-        result.reserve(total_size);
+        result.resize(total_size);
+        char* dst = result.data();
 
         for (size_t i = 0; i < parts.size(); ++i) {
-            result.append(parts[i]);
-            if (i < parts.size() - 1) result.append(sep);
+            std::memcpy(dst, parts[i].data(), parts[i].size());
+            dst += parts[i].size();
+            if (i < parts.size() - 1) {
+                std::memcpy(dst, sep.data(), sep.size());
+                dst += sep.size();
+            }
         }
         return result;
     }
@@ -111,53 +130,44 @@ struct Str {
         return Str(result);
     }
 
-    // ---------------- Replace (fast memcpy version) ----------------
+    // ---------------- Replace ----------------
     inline Str replace(std::string_view from, std::string_view to) const {
-      if (from.empty() || s.empty()) return Str(s);
+        if (from.empty() || s.empty()) return Str(s);
 
-      // Step 1: count occurrences
-      size_t count = 0;
-      const char* data = s.data();
-      size_t n = s.size();
-      size_t m = from.size();
+        size_t count = 0;
+        const char* data = s.data();
+        size_t n = s.size(), m = from.size();
 
-      for (size_t i = 0; i <= n - m; ) {
-          if (std::memcmp(data + i, from.data(), m) == 0) {
-              ++count;
-              i += m;
-          } else {
-              ++i;
-          }
-      }
+        for (size_t i = 0; i <= n - m;) {
+            if (std::memcmp(data + i, from.data(), m) == 0) {
+                ++count;
+                i += m;
+            } else {
+                ++i;
+            }
+        }
+        if (count == 0) return Str(s);
 
-      if (count == 0) return Str(s);
+        std::string result;
+        result.resize(n + count * (to.size() - m));
 
-      // Step 2: allocate final string
-      std::string result;
-      result.resize(n + count * (to.size() - m));
+        const char* src = data;
+        char* dst = result.data();
+        size_t i = 0;
 
-      const char* src = data;
-      char* dst = result.data();
-      size_t i = 0;
+        while (i <= n - m) {
+            if (std::memcmp(src + i, from.data(), m) == 0) {
+                std::memcpy(dst, to.data(), to.size());
+                dst += to.size();
+                i += m;
+            } else {
+                *dst++ = src[i++];
+            }
+        }
 
-      while (i <= n - m) {
-          if (std::memcmp(src + i, from.data(), m) == 0) {
-              // copy replacement
-              std::memcpy(dst, to.data(), to.size());
-              dst += to.size();
-              i += m;
-          } else {
-              *dst++ = src[i++];
-          }
-      }
-
-      // copy tail
-      size_t remaining = n - i;
-      if (remaining > 0)
-          std::memcpy(dst, src + i, remaining);
-
-      return Str(result);
-  }
+        std::memcpy(dst, src + i, n - i);
+        return Str(result);
+    }
 
     // ---------------- Strip ----------------
     inline Str lstrip() const {
@@ -179,20 +189,48 @@ struct Str {
         return Str(std::string_view(s.data() + start, end - start));
     }
 
-    // ---------------- Lower / Upper with ASCII LUT ----------------
+    // ---------------- Lower / Upper ----------------
     inline Str lower() const {
-      std::string result(s.size(), '\0');
-      for (size_t i = 0; i < s.size(); ++i)
-          result[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
-      return Str(result);
-  }
+        std::string result(s.size(), '\0');
+        const char* src = s.data();
+        char* dst = result.data();
+        size_t n = s.size();
 
-  inline Str upper() const {
-      std::string result(s.size(), '\0');
-      for (size_t i = 0; i < s.size(); ++i)
-          result[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[i])));
-      return Str(result);
-  }
+#if defined(__ARM_NEON) || defined(__aarch64__)
+        // vectorized NEON loop
+        for (size_t i = 0; i < n; ++i) {
+            unsigned char c = src[i];
+            dst[i] = c | ((c >= 'A' && c <= 'Z') ? 0x20 : 0);
+        }
+#else
+        // portable branchless
+        for (size_t i = 0; i < n; ++i) {
+            char c = src[i];
+            dst[i] = (c >= 'A' && c <= 'Z') ? (c | 0x20) : c;
+        }
+#endif
+        return Str(result);
+    }
+
+    inline Str upper() const {
+        std::string result(s.size(), '\0');
+        const char* src = s.data();
+        char* dst = result.data();
+        size_t n = s.size();
+
+#if defined(__ARM_NEON) || defined(__aarch64__)
+        for (size_t i = 0; i < n; ++i) {
+            unsigned char c = src[i];
+            dst[i] = (c >= 'a' && c <= 'z') ? (c & ~0x20) : c;
+        }
+#else
+        for (size_t i = 0; i < n; ++i) {
+            char c = src[i];
+            dst[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
+        }
+#endif
+        return Str(result);
+    }
 
     inline Str capitalize() const {
         if (s.empty()) return Str("");
@@ -206,13 +244,12 @@ struct Str {
     // ---------------- Remove ----------------
     inline Str remove(std::string_view sub) const { return replace(sub, ""); }
 
-    // ---------------- Count (manual scan) ----------------
+    // ---------------- Count ----------------
     inline int count(std::string_view sub) const {
         if (sub.empty()) return 0;
         int occurrences = 0;
         const char* src = s.data();
         size_t n = s.size(), m = sub.size();
-
         for (size_t i = 0; i <= n - m; ++i) {
             if (memcmp(src + i, sub.data(), m) == 0) {
                 ++occurrences;
@@ -225,7 +262,7 @@ struct Str {
     // ---------------- Contains ----------------
     inline bool contains(std::string_view sub) const { return s.find(sub) != std::string::npos; }
 
-    // ---------------- Repeat (doubling memcpy) ----------------
+    // ---------------- Repeat (doubling) ----------------
     inline Str repeat(int n) const {
         if (n <= 0 || s.empty()) return Str("");
         std::string result = s;
@@ -241,28 +278,22 @@ struct Str {
 
     inline Str operator*(int n) const { return repeat(n); }
 
-    // ---------------- Character Set Checks ----------------
+    // ---------------- Character set checks ----------------
     inline bool isAlpha() const {
         if (s.empty()) return false;
-        const char* src = s.data();
-        for (size_t i = 0; i < s.size(); ++i)
-            if (!std::isalpha(static_cast<unsigned char>(src[i]))) return false;
+        for (unsigned char c : s) if (!std::isalpha(c)) return false;
         return true;
     }
 
     inline bool isDigit() const {
         if (s.empty()) return false;
-        const char* src = s.data();
-        for (size_t i = 0; i < s.size(); ++i)
-            if (!std::isdigit(static_cast<unsigned char>(src[i]))) return false;
+        for (unsigned char c : s) if (!std::isdigit(c)) return false;
         return true;
     }
 
     inline bool isAlnum() const {
         if (s.empty()) return false;
-        const char* src = s.data();
-        for (size_t i = 0; i < s.size(); ++i)
-            if (!std::isalnum(static_cast<unsigned char>(src[i]))) return false;
+        for (unsigned char c : s) if (!std::isalnum(c)) return false;
         return true;
     }
 };
