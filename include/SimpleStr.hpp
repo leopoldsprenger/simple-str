@@ -52,7 +52,6 @@ struct Str {
     inline std::vector<std::string_view> split() const {
         std::vector<std::string_view> result;
         size_t i = 0, n = s.size();
-
         auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
 
         while (i < n) {
@@ -101,8 +100,7 @@ struct Str {
             return Str("");
 
         int size = (step > 0) ? (end - start + step - 1) / step : (start - end - step - 1) / (-step);
-        std::string result;
-        result.resize(size);
+        std::string result(size, '\0');
 
         size_t idx = 0;
         if (step > 0) {
@@ -113,25 +111,53 @@ struct Str {
         return Str(result);
     }
 
-    // ---------------- Replace ----------------
+    // ---------------- Replace (fast memcpy version) ----------------
     inline Str replace(std::string_view from, std::string_view to) const {
-        if (from.empty()) return Str(s);
+      if (from.empty() || s.empty()) return Str(s);
 
-        std::string result;
-        result.reserve(s.size()); // rough estimate
+      // Step 1: count occurrences
+      size_t count = 0;
+      const char* data = s.data();
+      size_t n = s.size();
+      size_t m = from.size();
 
-        size_t pos = 0;
-        while (true) {
-            size_t match = s.find(from, pos);
-            if (match == s.npos) break;
+      for (size_t i = 0; i <= n - m; ) {
+          if (std::memcmp(data + i, from.data(), m) == 0) {
+              ++count;
+              i += m;
+          } else {
+              ++i;
+          }
+      }
 
-            result.append(s.data() + pos, match - pos);
-            result.append(to);
-            pos = match + from.size();
-        }
-        result.append(s.data() + pos, s.size() - pos);
-        return Str(result);
-    }
+      if (count == 0) return Str(s);
+
+      // Step 2: allocate final string
+      std::string result;
+      result.resize(n + count * (to.size() - m));
+
+      const char* src = data;
+      char* dst = result.data();
+      size_t i = 0;
+
+      while (i <= n - m) {
+          if (std::memcmp(src + i, from.data(), m) == 0) {
+              // copy replacement
+              std::memcpy(dst, to.data(), to.size());
+              dst += to.size();
+              i += m;
+          } else {
+              *dst++ = src[i++];
+          }
+      }
+
+      // copy tail
+      size_t remaining = n - i;
+      if (remaining > 0)
+          std::memcpy(dst, src + i, remaining);
+
+      return Str(result);
+  }
 
     // ---------------- Strip ----------------
     inline Str lstrip() const {
@@ -153,41 +179,45 @@ struct Str {
         return Str(std::string_view(s.data() + start, end - start));
     }
 
-    // ---------------- Lower, Upper, Capitalize ----------------
+    // ---------------- Lower / Upper with ASCII LUT ----------------
     inline Str lower() const {
-        std::string result(s.size(), '\0');
-        std::transform(s.begin(), s.end(), result.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
-        return Str(result);
-    }
+      std::string result(s.size(), '\0');
+      for (size_t i = 0; i < s.size(); ++i)
+          result[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
+      return Str(result);
+  }
 
-    inline Str upper() const {
-        std::string result(s.size(), '\0');
-        std::transform(s.begin(), s.end(), result.begin(),
-                       [](unsigned char c) { return std::toupper(c); });
-        return Str(result);
-    }
+  inline Str upper() const {
+      std::string result(s.size(), '\0');
+      for (size_t i = 0; i < s.size(); ++i)
+          result[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[i])));
+      return Str(result);
+  }
 
     inline Str capitalize() const {
         if (s.empty()) return Str("");
         std::string result(s.size(), '\0');
         result[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[0])));
-        std::transform(s.begin() + 1, s.end(), result.begin() + 1,
-                       [](unsigned char c) { return std::tolower(c); });
+        for (size_t i = 1; i < s.size(); ++i)
+            result[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
         return Str(result);
     }
 
     // ---------------- Remove ----------------
     inline Str remove(std::string_view sub) const { return replace(sub, ""); }
 
-    // ---------------- Count ----------------
+    // ---------------- Count (manual scan) ----------------
     inline int count(std::string_view sub) const {
         if (sub.empty()) return 0;
         int occurrences = 0;
-        size_t pos = 0;
-        while ((pos = s.find(sub, pos)) != std::string::npos) {
-            ++occurrences;
-            pos += sub.size();
+        const char* src = s.data();
+        size_t n = s.size(), m = sub.size();
+
+        for (size_t i = 0; i <= n - m; ++i) {
+            if (memcmp(src + i, sub.data(), m) == 0) {
+                ++occurrences;
+                i += m - 1;
+            }
         }
         return occurrences;
     }
@@ -195,15 +225,16 @@ struct Str {
     // ---------------- Contains ----------------
     inline bool contains(std::string_view sub) const { return s.find(sub) != std::string::npos; }
 
-    // ---------------- Repeat ----------------
+    // ---------------- Repeat (doubling memcpy) ----------------
     inline Str repeat(int n) const {
         if (n <= 0 || s.empty()) return Str("");
-        std::string result;
+        std::string result = s;
         result.resize(s.size() * n);
-        char* out = result.data();
-        for (int i = 0; i < n; ++i) {
-            memcpy(out, s.data(), s.size());
-            out += s.size();
+        size_t copied = s.size();
+        while (copied < result.size()) {
+            size_t chunk = std::min(copied, result.size() - copied);
+            memcpy(result.data() + copied, result.data(), chunk);
+            copied += chunk;
         }
         return Str(result);
     }
@@ -213,17 +244,26 @@ struct Str {
     // ---------------- Character Set Checks ----------------
     inline bool isAlpha() const {
         if (s.empty()) return false;
-        return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isalpha(c); });
+        const char* src = s.data();
+        for (size_t i = 0; i < s.size(); ++i)
+            if (!std::isalpha(static_cast<unsigned char>(src[i]))) return false;
+        return true;
     }
 
     inline bool isDigit() const {
         if (s.empty()) return false;
-        return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c); });
+        const char* src = s.data();
+        for (size_t i = 0; i < s.size(); ++i)
+            if (!std::isdigit(static_cast<unsigned char>(src[i]))) return false;
+        return true;
     }
 
     inline bool isAlnum() const {
         if (s.empty()) return false;
-        return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isalnum(c); });
+        const char* src = s.data();
+        for (size_t i = 0; i < s.size(); ++i)
+            if (!std::isalnum(static_cast<unsigned char>(src[i]))) return false;
+        return true;
     }
 };
 
