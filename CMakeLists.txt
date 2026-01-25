@@ -20,3 +20,11 @@ add_executable(tests
 
 # Link Catch2 main
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
+
+# Benchmark executable
+add_executable(benchmark
+    bench/benchmark_all.cpp
+)
+
+# Enable high optimization for benchmarks
+target_compile_options(benchmark PRIVATE -O3)
