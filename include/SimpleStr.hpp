@@ -267,6 +267,20 @@ struct Str {
     return Str(result);
   }
 
+  // ---------------- Reverse ----------------
+  inline Str reverse() const {
+    std::string result(s.size(), '\0');
+    const char *src = s.data();
+    char *dst = result.data();
+    size_t n = s.size();
+
+    for (size_t i = 0; i < n; ++i) {
+      dst[i] = src[n - 1 - i];
+    }
+
+    return Str(result);
+  }
+
   // ---------------- Remove ----------------
   inline Str remove(std::string_view sub) const { return replace(sub, ""); }
 

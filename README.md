@@ -5,6 +5,8 @@
 
 Ultra-fast, Pythonic string manipulation library for C++17+, header-only, with benchmarks demonstrating performance gains over Python and `std::string`.
 
+TODO: add documentation, add tests and bench for replace
+
 ---
 
 ## Index
